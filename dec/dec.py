@@ -20,16 +20,16 @@ from __future__ import print_function
 import sys
 import os
 # code to automatically download dataset
-curr_path = os.path.dirname(os.path.abspath(os.path.expanduser(__file__)))
-sys.path = [os.path.join(curr_path, "../autoencoder")] + sys.path
+# curr_path = os.path.dirname(os.path.abspath(os.path.expanduser(__file__)))
+# sys.path = [os.path.join(curr_path, "../autoencoder")] + sys.path
 import mxnet as mx
 import numpy as np
-import data
+import autoencoder.data
 from scipy.spatial.distance import cdist
 from sklearn.cluster import KMeans
-import model
-from autoencoder import AutoEncoderModel
-from solver import Solver, Monitor
+import autoencoder.model
+from autoencoder.autoencoder import AutoEncoderModel
+from autoencoder.solver import Solver, Monitor
 import logging
 
 def cluster_acc(Y_pred, Y):
@@ -42,7 +42,7 @@ def cluster_acc(Y_pred, Y):
   ind = linear_assignment(w.max() - w)
   return sum([w[i,j] for i,j in ind])*1.0/Y_pred.size, w
 
-class DECModel(model.MXModel):
+class DECModel(autoencoder.model.MXModel):
     class DECLoss(mx.operator.NumpyOp):
         def __init__(self, num_centers, alpha):
             super(DECModel.DECLoss, self).__init__(need_top_grad=False)
@@ -115,7 +115,7 @@ class DECModel(model.MXModel):
         test_iter = mx.io.NDArrayIter({'data': X}, batch_size=batch_size, shuffle=False,
                                       last_batch_handle='pad')
         args = {k: mx.nd.array(v.asnumpy(), ctx=self.xpu) for k, v in self.args.items()}
-        z = list(model.extract_feature(self.feature, args, None, test_iter, N, self.xpu).values())[0]
+        z = list(autoencoder.model.extract_feature(self.feature, args, None, test_iter, N, self.xpu).values())[0]
         kmeans = KMeans(self.num_centers, n_init=20)
         kmeans.fit(z)
         args['dec_mu'][:] = kmeans.cluster_centers_
@@ -159,7 +159,7 @@ class DECModel(model.MXModel):
             return -1
 
 def mnist_exp(xpu):
-    X, Y = data.get_mnist()
+    X, Y = autoencoder.data.get_mnist()
     dec_model = DECModel(xpu, X, 10, 1.0, 'data/mnist')
     acc = []
     for i in [10*(2**j) for j in range(9)]:
