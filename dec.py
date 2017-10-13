@@ -170,5 +170,5 @@ def mnist_exp(xpu):
 
 if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO)
-    mnist_exp(mx.cpu(0))
+    mnist_exp(mx.gpu(1))
 
