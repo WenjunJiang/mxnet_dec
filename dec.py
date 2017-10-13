@@ -130,7 +130,7 @@ class DECModel(autoencoder.model.MXModel):
         self.y_pred = np.zeros((X.shape[0]))
         def refresh(i):
             if i%update_interval == 0:
-                z = list(model.extract_feature(self.feature, args, None, test_iter, N, self.xpu).values())[0]
+                z = list(autoencoder.model.extract_feature(self.feature, args, None, test_iter, N, self.xpu).values())[0]
                 p = np.zeros((z.shape[0], self.num_centers))
                 self.dec_op.forward([z, args['dec_mu'].asnumpy()], [p])
                 y_pred = p.argmax(axis=1)
@@ -151,7 +151,7 @@ class DECModel(autoencoder.model.MXModel):
         solver.set_monitor(Monitor(50))
 
         solver.solve(self.xpu, self.loss, args, self.args_grad, None,
-                     train_iter, 0, 1000000000, {}, False)
+                     train_iter, 0, 1000, {}, False)
         self.end_args = args
         if y is not None:
             return cluster_acc(self.y_pred, y)[0]
@@ -160,7 +160,7 @@ class DECModel(autoencoder.model.MXModel):
 
 def mnist_exp(xpu):
     X, Y = autoencoder.data.get_mnist()
-    dec_model = DECModel(xpu, X, 10, 1.0, 'data/mnist')
+    dec_model = DECModel(xpu, X, 10, 1.0)
     acc = []
     for i in [10*(2**j) for j in range(9)]:
         acc.append(dec_model.cluster(X, Y, i))
