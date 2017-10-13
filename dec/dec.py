@@ -86,9 +86,9 @@ class DECModel(model.MXModel):
         X_val = X[sep:]
         ae_model = AutoEncoderModel(self.xpu, [X.shape[1],500,500,2000,10], pt_dropout=0.2)
         if not os.path.exists(save_to+'_pt.arg'):
-            ae_model.layerwise_pretrain(X_train, 256, 50000, 'sgd', l_rate=0.1, decay=0.0,
+            ae_model.layerwise_pretrain(X_train, 256, 500, 'sgd', l_rate=0.1, decay=0.0,
                                         lr_scheduler=mx.misc.FactorScheduler(20000,0.1))
-            ae_model.finetune(X_train, 256, 100000, 'sgd', l_rate=0.1, decay=0.0,
+            ae_model.finetune(X_train, 256, 1000, 'sgd', l_rate=0.1, decay=0.0,
                               lr_scheduler=mx.misc.FactorScheduler(20000,0.1))
             ae_model.save(save_to+'_pt.arg')
             logging.log(logging.INFO, "Autoencoder Training error: %f"%ae_model.eval(X_train))
