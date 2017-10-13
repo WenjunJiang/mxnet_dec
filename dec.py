@@ -24,12 +24,12 @@ import os
 # sys.path = [os.path.join(curr_path, "../autoencoder")] + sys.path
 import mxnet as mx
 import numpy as np
-import autoencoder.data
+import aelib.data
 from scipy.spatial.distance import cdist
 from sklearn.cluster import KMeans
-import autoencoder.model
-from autoencoder.autoencoder import AutoEncoderModel
-from autoencoder.solver import Solver, Monitor
+import aelib.model
+from aelib.autoencoder import AutoEncoderModel
+from aelib.solver import Solver, Monitor
 import logging
 
 def cluster_acc(Y_pred, Y):
@@ -42,7 +42,7 @@ def cluster_acc(Y_pred, Y):
   ind = linear_assignment(w.max() - w)
   return sum([w[i,j] for i,j in ind])*1.0/Y_pred.size, w
 
-class DECModel(autoencoder.model.MXModel):
+class DECModel(aelib.model.MXModel):
     class DECLoss(mx.operator.NumpyOp):
         def __init__(self, num_centers, alpha):
             super(DECModel.DECLoss, self).__init__(need_top_grad=False)
@@ -86,9 +86,9 @@ class DECModel(autoencoder.model.MXModel):
         X_val = X[sep:]
         ae_model = AutoEncoderModel(self.xpu, [X.shape[1],500,500,2000,10], pt_dropout=0.2)
         if not os.path.exists(save_to+'_pt.arg'):
-            ae_model.layerwise_pretrain(X_train, 256, 500, 'sgd', l_rate=0.1, decay=0.0,
+            ae_model.layerwise_pretrain(X_train, 256, 50000, 'sgd', l_rate=0.1, decay=0.0,
                                         lr_scheduler=mx.misc.FactorScheduler(20000,0.1))
-            ae_model.finetune(X_train, 256, 1000, 'sgd', l_rate=0.1, decay=0.0,
+            ae_model.finetune(X_train, 256, 100000, 'sgd', l_rate=0.1, decay=0.0,
                               lr_scheduler=mx.misc.FactorScheduler(20000,0.1))
             ae_model.save(save_to+'_pt.arg')
             logging.log(logging.INFO, "Autoencoder Training error: %f"%ae_model.eval(X_train))
@@ -115,7 +115,7 @@ class DECModel(autoencoder.model.MXModel):
         test_iter = mx.io.NDArrayIter({'data': X}, batch_size=batch_size, shuffle=False,
                                       last_batch_handle='pad')
         args = {k: mx.nd.array(v.asnumpy(), ctx=self.xpu) for k, v in self.args.items()}
-        z = list(autoencoder.model.extract_feature(self.feature, args, None, test_iter, N, self.xpu).values())[0]
+        z = list(aelib.model.extract_feature(self.feature, args, None, test_iter, N, self.xpu).values())[0]
         kmeans = KMeans(self.num_centers, n_init=20)
         kmeans.fit(z)
         args['dec_mu'][:] = kmeans.cluster_centers_
@@ -130,7 +130,7 @@ class DECModel(autoencoder.model.MXModel):
         self.y_pred = np.zeros((X.shape[0]))
         def refresh(i):
             if i%update_interval == 0:
-                z = list(model.extract_feature(self.feature, args, None, test_iter, N, self.xpu).values())[0]
+                z = list(aelib.model.extract_feature(self.feature, args, None, test_iter, N, self.xpu).values())[0]
                 p = np.zeros((z.shape[0], self.num_centers))
                 self.dec_op.forward([z, args['dec_mu'].asnumpy()], [p])
                 y_pred = p.argmax(axis=1)
@@ -151,7 +151,7 @@ class DECModel(autoencoder.model.MXModel):
         solver.set_monitor(Monitor(50))
 
         solver.solve(self.xpu, self.loss, args, self.args_grad, None,
-                     train_iter, 0, 1000000000, {}, False)
+                     train_iter, 0, 1000, {}, False)
         self.end_args = args
         if y is not None:
             return cluster_acc(self.y_pred, y)[0]
@@ -159,8 +159,8 @@ class DECModel(autoencoder.model.MXModel):
             return -1
 
 def mnist_exp(xpu):
-    X, Y = autoencoder.data.get_mnist()
-    dec_model = DECModel(xpu, X, 10, 1.0, 'data/mnist')
+    X, Y = aelib.data.get_mnist()
+    dec_model = DECModel(xpu, X, 10, 1.0)
     acc = []
     for i in [10*(2**j) for j in range(9)]:
         acc.append(dec_model.cluster(X, Y, i))
