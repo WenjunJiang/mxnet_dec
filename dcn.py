@@ -25,7 +25,41 @@ def cluster_acc(Y_pred, Y):
   ind = linear_assignment(w.max() - w)
   return sum([w[i,j] for i,j in ind])*1.0/Y_pred.size, w
 
+def batch_km(data, center, count):
+    """
+    Function to perform a KMeans update on a batch of data, center is the centroid
+    from last iteration.
+
+    """
+    N = data.shape[0]
+    K = center.shape[0]
+
+    # update assignment
+    idx = np.zeros(N, dtype=np.int)
+    idx_onehot = np.zeros([N,K], dtype=np.int)
+    for i in range(N):
+        dist = np.inf
+        ind = 0
+        for j in range(K):
+            temp_dist = np.linalg.norm(data[i] - center[j])
+            if temp_dist < dist:
+                dist = temp_dist
+                ind = j
+        idx[i] = ind
+        idx_onehot[i][ind]=1
+
+    # update centriod
+    center_new = center
+    for i in range(N):
+        c = idx[i]
+        count[c] += 1
+        eta = 1 / count[c]
+        center_new[c] = (1 - eta) * center_new[c] + eta * data[i]
+
+    return idx_onehot, center_new, count
+
 class DCNModel(aelib.model.MXModel):
+
     class DCNLoss(mx.operator.NumpyOp):
         def __init__(self, num_centers, alpha):
             super(DCNModel.DCNLoss, self).__init__(need_top_grad=False)
@@ -105,34 +139,44 @@ class DCNModel(aelib.model.MXModel):
         kmeans.fit(z)
         args['dec_mu'][:] = kmeans.cluster_centers_
         solver = Solver('sgd', momentum=0.9, wd=0.0, learning_rate=0.01)
-        def ce(label, pred):
-            return np.sum(label*np.log(label/(pred+0.000001)))/label.shape[0]
-        solver.set_metric(mx.metric.CustomMetric(ce))
+        def l2_norm(label, pred):
+            M = args['dec_mu']
+            return np.mean(np.square(pred-mx.nd.dot(label,M)))/2.0
+        solver.set_metric(mx.metric.CustomMetric(l2_norm))
 
         label_buff = np.zeros((X.shape[0], self.num_centers))
         train_iter = mx.io.NDArrayIter({'data': X}, {'label': label_buff}, batch_size=batch_size,
                                        shuffle=False, last_batch_handle='roll_over')
         self.y_pred = np.zeros((X.shape[0]))
+        # added by jwj to implement DCN
+        self.count = 100 * np.ones(self.num_centers, dtype=np.int)
         def refresh(i):
             if i%update_interval == 0:
                 z = list(aelib.model.extract_feature(self.feature, args, None, test_iter, N, self.xpu).values())[0]
-                p = np.zeros((z.shape[0], self.num_centers))
-                self.dec_op.forward([z, args['dec_mu'].asnumpy()], [p]) #Can we also calculate the backward?
-                y_pred = p.argmax(axis=1)
-                print(np.std(np.bincount(y_pred)), np.bincount(y_pred))
-                print(np.std(np.bincount(y.astype(np.int))), np.bincount(y.astype(np.int)))
-                if y is not None:
-                    print(cluster_acc(y_pred, y)[0])
-                weight = 1.0/p.sum(axis=0)
-                weight *= self.num_centers/weight.sum()
-                p = (p**2)*weight
-                # We can update s, m, and store them in data_list.
-                train_iter.data_list[1][:] = (p.T/p.sum(axis=1)).T #This is where we can update "label"
-                print(np.sum(y_pred != self.y_pred), 0.001*y_pred.shape[0])
-                if np.sum(y_pred != self.y_pred) < 0.001*y_pred.shape[0]:
-                    self.y_pred = y_pred
-                    return True
-                self.y_pred = y_pred
+                center = args['dec_mu'].asnumpy()
+                idx_onehot, center_new, count = batch_km(z, center, self.count)
+                train_iter.data_list[1][:] = idx_onehot #s_ij
+                args['dec_mu'][:] = center_new #m_ij
+                self.count[:] = count #c_i^k
+
+                # p = np.zeros((z.shape[0], self.num_centers))
+                # self.dec_op.forward([z, args['dec_mu'].asnumpy()], [p]) #Can we also calculate the backward?
+                # y_pred = p.argmax(axis=1)
+                # print(np.std(np.bincount(y_pred)), np.bincount(y_pred))
+                # print(np.std(np.bincount(y.astype(np.int))), np.bincount(y.astype(np.int)))
+                # if y is not None:
+                #     print(cluster_acc(y_pred, y)[0])
+                # weight = 1.0/p.sum(axis=0)
+                # weight *= self.num_centers/weight.sum()
+                # p = (p**2)*weight
+                # # We can update s, m, and store them in data_list.
+                # train_iter.data_list[1][:] = (p.T/p.sum(axis=1)).T #This is where we can update "label"
+                # print(np.sum(y_pred != self.y_pred), 0.001*y_pred.shape[0])
+                # if np.sum(y_pred != self.y_pred) < 0.001*y_pred.shape[0]:
+                #     self.y_pred = y_pred
+                #     return True
+                # self.y_pred = y_pred
+
         solver.set_iter_start_callback(refresh)
         solver.set_monitor(Monitor(50))
 
