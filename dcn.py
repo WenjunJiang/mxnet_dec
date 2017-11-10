@@ -19,9 +19,9 @@ def cluster_acc(Y_pred, Y):
   from sklearn.utils.linear_assignment_ import linear_assignment
   assert Y_pred.size == Y.size
   D = max(Y_pred.max(), Y.max())+1
-  w = np.zeros((D,D), dtype=np.int64)
+  w = np.zeros((int(D),int(D)), dtype=np.int64)
   for i in range(Y_pred.size):
-    w[Y_pred[i], int(Y[i])] += 1
+    w[int(Y_pred[i]), int(Y[i])] += 1
   ind = linear_assignment(w.max() - w)
   return sum([w[i,j] for i,j in ind])*1.0/Y_pred.size, w
 
@@ -119,7 +119,7 @@ class DCNModel(aelib.model.MXModel):
         self.dec_op = DCNModel.DCNLoss(num_centers, alpha)
         label = mx.sym.Variable('label')
         self.feature = self.ae_model.encoder
-        self.loss = self.dec_op(data=self.ae_model.encoder, label=label, name='dec')
+        self.loss = self.dec_op(data=self.ae_model.encoder, label=label, name='dec') #We need to change this!
         self.args.update({k:v for k,v in self.ae_model.args.items() if k in self.ae_model.encoder.list_arguments()})
         self.args['dec_mu'] = mx.nd.empty((num_centers, self.ae_model.dims[-1]), ctx=self.xpu)
         self.args_grad.update({k: mx.nd.empty(v.shape, ctx=self.xpu) for k,v in self.args.items()})
@@ -139,9 +139,9 @@ class DCNModel(aelib.model.MXModel):
         kmeans.fit(z)
         args['dec_mu'][:] = kmeans.cluster_centers_
         solver = Solver('sgd', momentum=0.9, wd=0.0, learning_rate=0.01)
-        def l2_norm(label, pred):
-            M = args['dec_mu']
-            return np.mean(np.square(pred-mx.nd.dot(label,M)))/2.0
+        def l2_norm(label, pred): #Here we should add the autoencoder loss, but I don't know how
+            M = args['dec_mu'].asnumpy()
+            return np.mean(np.square(pred-np.dot(label,M)))/2.0
         solver.set_metric(mx.metric.CustomMetric(l2_norm))
 
         label_buff = np.zeros((X.shape[0], self.num_centers))
@@ -149,7 +149,7 @@ class DCNModel(aelib.model.MXModel):
                                        shuffle=False, last_batch_handle='roll_over')
         self.y_pred = np.zeros((X.shape[0]))
         # added by jwj to implement DCN
-        self.count = 100 * np.ones(self.num_centers, dtype=np.int)
+        self.count = 10 * np.ones(self.num_centers, dtype=np.int)
         def refresh(i):
             if i%update_interval == 0:
                 z = list(aelib.model.extract_feature(self.feature, args, None, test_iter, N, self.xpu).values())[0]
@@ -181,7 +181,7 @@ class DCNModel(aelib.model.MXModel):
         solver.set_monitor(Monitor(50))
 
         solver.solve(self.xpu, self.loss, args, self.args_grad, None,
-                     train_iter, 0, 1000, {}, False)
+                     train_iter, 0, 20, {}, False)
         self.end_args = args
         if y is not None:
             return cluster_acc(self.y_pred, y)[0]

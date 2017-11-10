@@ -154,7 +154,7 @@ class DECModel(aelib.model.MXModel):
         solver.set_monitor(Monitor(50))
 
         solver.solve(self.xpu, self.loss, args, self.args_grad, None,
-                     train_iter, 0, 1000, {}, False)
+                     train_iter, 0, 20, {}, False)
         self.end_args = args
         if y is not None:
             return cluster_acc(self.y_pred, y)[0]
@@ -165,7 +165,7 @@ def mnist_exp(xpu):
     X, Y = aelib.data.get_mnist()
     dec_model = DECModel(xpu, X, 10, 1.0)
     acc = []
-    for i in [10*(2**j) for j in range(9)]:
+    for i in [10]:#[10*(2**j) for j in range(9)]:
         acc.append(dec_model.cluster(X, Y, i))
         logging.log(logging.INFO, 'Clustering Acc: %f at update interval: %d'%(acc[-1], i))
     logging.info(str(acc))
