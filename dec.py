@@ -43,6 +43,11 @@ def cluster_acc(Y_pred, Y):
   ind = linear_assignment(w.max() - w)
   return sum([w[i,j] for i,j in ind])*1.0/Y_pred.size, w
 
+def p_from_q (q):
+    p_num = q**2/q.sum(axis=0, keepdims=True)
+    p = p_num/p_num.sum(axis=1, keepdims=True)
+    return p
+
 class DECModel(aelib.model.MXModel):
     class DECLoss(mx.operator.NumpyOp):
         def __init__(self, num_centers, alpha):
@@ -57,17 +62,36 @@ class DECModel(aelib.model.MXModel):
             self.mask = 1.0/(1.0+cdist(z, mu)**2/self.alpha)
             q[:] = self.mask**((self.alpha+1.0)/2.0)
             q[:] = (q.T/q.sum(axis=1)).T
+            #Add by jwj for test
+            self.z = z
+            self.mu = mu
 
         def backward(self, out_grad, in_data, out_data, in_grad):
-            q = out_data[0]
-            z = in_data[0]
-            mu = in_data[1]
-            p = in_data[2]
-            dz = in_grad[0]
-            dmu = in_grad[1]
-            self.mask *= (self.alpha+1.0)/self.alpha*(p-q)
-            dz[:] = (z.T*self.mask.sum(axis=1)).T - self.mask.dot(mu)
-            dmu[:] = (mu.T*self.mask.sum(axis=0)).T - self.mask.T.dot(z)
+            # q = out_data[0]
+            # z = in_data[0]
+            # mu = in_data[1]
+            # p = in_data[2]
+            # dz = in_grad[0]
+            # dmu = in_grad[1]
+            # self.mask *= (self.alpha+1.0)/self.alpha*(p-q)
+            # dz[:] = (z.T*self.mask.sum(axis=1)).T - self.mask.dot(mu)
+            # dmu[:] = (mu.T*self.mask.sum(axis=0)).T - self.mask.T.dot(z)
+
+            # Add by jwj for test
+            z_np = self.z
+            mu_np = self.mu
+            alpha_np = self.alpha
+            mask = 1.0 / (1.0 + cdist(z_np, mu_np) ** 2 / alpha_np)
+            q = mask ** ((alpha_np + 1.0) / 2.0)
+            q = (q.T / q.sum(axis=1)).T
+            # Calculate p using q
+            p = p_from_q(q)
+            # Calculate dz and dmu
+            mask *= (alpha_np + 1.0) / alpha_np * (p - q)
+            dz = z_np * mask.sum(axis=1, keepdims=True) - mask.dot(mu_np)
+            dmu = mu_np * mask.T.sum(axis=1, keepdims=True) - mask.T.dot(z_np)
+            in_grad[0][:] = dz  # Why in_grad?
+            in_grad[1][:] = dmu
 
         def infer_shape(self, in_shape):
             assert len(in_shape) == 3
@@ -87,7 +111,7 @@ class DECModel(aelib.model.MXModel):
         X_val = X[sep:]
         ae_model = AutoEncoderModel(self.xpu, [X.shape[1],500,500,2000,10], pt_dropout=0.2)
         if not os.path.exists(save_to+'_pt.arg'):
-            ae_model.layerwise_pretrain(X_train, 256, 500000, 'sgd', l_rate=0.1, decay=0.0,
+            ae_model.layerwise_pretrain(X_train, 256, 100000, 'sgd', l_rate=0.1, decay=0.0,
                                         lr_scheduler=mx.misc.FactorScheduler(20000,0.1))
 
             ae_model.finetune(X_train, 256, 100000, 'sgd', l_rate=0.1, decay=0.0,
@@ -173,5 +197,5 @@ def mnist_exp(xpu):
 
 if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO)
-    mnist_exp(mx.cpu(0))
+    mnist_exp(mx.gpu(0))
 
